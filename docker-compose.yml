@@ -1,0 +1,28 @@
+# テスト実行専用のDocker Compose構成。
+#
+# ホストのRuby環境には一切触れず、公式のrubyイメージ上でこのgemディレクトリを
+# マウントしてテストを実行するだけの、使い捨て環境です。イメージのビルド
+# ステップを持たない（公式イメージをそのまま使う）ので、Gemfileを変更しても
+# イメージの再ビルドは不要です。
+#
+# 実行:
+#   ./bin/docker-test          （推奨・実行ユーザーのUID/GIDを自動で渡す）
+#   docker compose run --rm test   （直接呼ぶ場合。詳細はREADME参照）
+services:
+  test:
+    image: ruby:3.2-slim
+    working_dir: /gem
+    # ホスト側の実行ユーザーと同じUID/GIDでコンテナを動かし、bundle installで
+    # 生成されるGemfile.lockや.bundle/がroot所有になるのを防ぐ。
+    # bin/docker-test 経由で実行すると自動設定される。
+    user: "${DOCKER_TEST_UID:-1000}:${DOCKER_TEST_GID:-1000}"
+    environment:
+      # 任意UIDで動かすと/etc/passwdにエントリがなくHOMEが不定になるため明示。
+      HOME: /tmp
+      # 依存gemはこのディレクトリ配下（.gitignore済み）に閉じ込め、名前付き
+      # ボリュームではなくホストのbind mount上に置くことで、透過的にキャッシュ
+      # される（2回目以降のbundle installは高速）。
+      BUNDLE_PATH: /gem/.bundle/cache
+    volumes:
+      - .:/gem
+    command: bash -c "bundle install && bundle exec rake test"

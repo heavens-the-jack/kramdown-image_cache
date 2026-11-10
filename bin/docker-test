@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# ホストのRuby環境に触れずにテストを実行する。
+#
+# 実行ユーザーのUID/GIDをコンテナに渡すことで、bundle installが生成する
+# Gemfile.lockや.bundle/がroot所有になるのを防いでいる（docker-compose.yml参照）。
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+export DOCKER_TEST_UID="$(id -u)"
+export DOCKER_TEST_GID="$(id -g)"
+
+if docker compose version >/dev/null 2>&1; then
+  docker compose run --rm test "$@"
+else
+  docker-compose run --rm test "$@"
+fi
