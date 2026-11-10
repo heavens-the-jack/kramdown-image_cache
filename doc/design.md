@@ -1,76 +1,78 @@
-# 設計ドキュメント：Kramdown::ImageCache
+# Design Document: Kramdown::ImageCache
 
-**作成日**: 2026-09-09
-**担当**: Jack
-**位置づけ**: このドキュメントは、技術検討の議事録を兼ねた設計ドキュメントです。結論だけでなく、途中で検討して却下した案とその理由も残しています。
+[日本語版 / Japanese](./design.ja.md)
+
+**Created**: 2026-09-09
+**Author**: Jack
+**Purpose**: This is a design document that doubles as the minutes of the technical discussion. It records not only the conclusion but also the alternatives that were considered and rejected along the way, with the reasons.
 
 ---
 
-## 0. 要件と受け入れ条件
+## 0. Requirements and acceptance criteria
 
-### 要件
+### Requirements
 
-| ID | 要件 |
+| ID | Requirement |
 |---|---|
-| R1 | 公開Gitタグ（`v0.1.0`）から、Gemfileの`git:`／`tag:`指定で利用できる（gemspecに`source_code_uri`・`changelog_uri`、`CHANGELOG.md`を備える） |
-| R2 | キャッシュする画像形式はPNG／JPEG／GIF／WebPのみ。判定は宣言ではなくシグネチャで行い、許可外は`data:`のまま残す |
-| R3 | Ruby 3.4以降でも警告なく動く（`base64`を明示的な依存にする） |
-| R4 | `Converter`を継承して描画を拡張でき、`url_prefix`・`content_id`を描画ごとに変えられる。`input: "GFM"`が使える。`store`／`content_id`が未設定なら`data:`のまま出力する |
-| R5 | `content_id`は整数でも文字列でも使える。不正なIDは`Error`にして、ファイルを書かない |
-| R6 | Rails以外（Sinatra、静的サイト生成）でも使える。依存は`kramdown`と`base64`のみ |
-| R7 | READMEに、許可リストとその理由、配信側の責務、暗号化コンテンツでは使わないこと、最小例を記載する（英語を正とし、日本語版を併記） |
+| R1 | Usable from a public Git tag (`v0.1.0`) via `git:` / `tag:` in a Gemfile (the gemspec has `source_code_uri` and `changelog_uri`, and `CHANGELOG.md` is shipped) |
+| R2 | Only PNG / JPEG / GIF / WebP are cached. The format is decided by signature, not by declaration; anything outside the allowlist stays as a `data:` URI |
+| R3 | Works without warnings on Ruby 3.4 and later (`base64` is an explicit dependency) |
+| R4 | Rendering can be extended by subclassing `Converter`, and `url_prefix` / `content_id` can change per render. `input: "GFM"` works. If `store` / `content_id` is not set, output stays as `data:` |
+| R5 | `content_id` works as an Integer or a String. An invalid id raises `Error` and writes nothing |
+| R6 | Usable without Rails (Sinatra, static site generation). Dependencies are `kramdown` and `base64` only |
+| R7 | The README documents the allowlist and its rationale, the delivery layer's responsibilities, that the gem must not be used with encrypted content, and minimal examples (English is canonical; a Japanese version sits alongside) |
 
-### 受け入れ条件
+### Acceptance criteria
 
-- Ruby 3.3／3.4の両方で`bin/docker-test`がすべて成功し、このgem由来の警告がない
-- 許可外の形式（SVG、HTML等）と、宣言とシグネチャが食い違う画像は`data:`のまま出力され、ファイルが書かれない（`test/materializer_test.rb`、`test/converter_test.rb`）
-- 公開契約（サブクラス化、GFM、未設定時の素通し、`content_id`の形）が`test/contract_test.rb`で固定されている
-- `gem build`が警告なく通り、成果物に`CHANGELOG.md`・README・LICENSEが含まれる
-
----
-
-## 1. 背景・課題
-
-対象アプリでは、Markdown形式のユーザーコンテンツにおいて、画像を物理ファイルとして別管理せず、**Base64エンコードした文字列としてMarkdown本文に直接埋め込む**方式を採っている。メタ情報はDBに、コンテンツ本体（Base64込み）はアプリが内包するローカルgitリポジトリにコミットする形で管理している。
-
-この方式の狙いは明確で、**「本文（＋gitリポジトリ）だけを見れば全てが揃っている」という高い可搬性**にある。物置き場としての外部ストレージ（S3等）はもちろん、アプリ側に「画像ファイルを別途管理する」という責務自体を持たせたくない、という一貫した思想がある。
-
-一方でこの方式には副作用がある。**レンダリングされたHTMLの中に画像バイトがテキストとしてそのまま埋め込まれる**ため、以下が起きる。
-
-- ブラウザキャッシュ・CDNキャッシュが一切効かない（`<img src="data:...">`はURLを持たないため、HTTPキャッシュの対象にならない）
-- ページを表示するたびに、画像バイトを（Base64で約33%膨張した状態で）毎回丸ごと転送することになる
-
-この副作用を解消したい、というのが出発点。
+- `bin/docker-test` passes on both Ruby 3.3 and 3.4, with no warnings originating from this gem
+- Formats outside the allowlist (SVG, HTML, ...) and images whose declaration disagrees with their signature stay as `data:` and no file is written (`test/materializer_test.rb`, `test/converter_test.rb`)
+- The public contract (subclassing, GFM, pass-through when unconfigured, `content_id` shapes) is pinned by `test/contract_test.rb`
+- `gem build` succeeds without warnings, and the built gem contains `CHANGELOG.md`, the READMEs and the LICENSE
 
 ---
 
-## 2. 検討して却下した案
+## 1. Background and problem
 
-### 2-1. レスポンス全体を書き換えるRack middleware
+In the target application, Markdown user content does not manage images as separate physical files. Instead, **images are base64-encoded and embedded directly in the Markdown body**. Metadata lives in the database, and the content itself (base64 included) is committed to a local git repository the application carries with it.
 
-最初に提起されたアイディア。HTTPレスポンスの生成後、middlewareでレスポンスボディ全体を正規表現等でスキャンし、Base64画像を検出して物理ファイル化＋URL置換する、という案。
+The goal of this approach is clear: **high portability, where "the body (plus the git repository) alone contains everything."** There is a consistent philosophy behind it: no external object storage (S3 and the like) as a place to put files, and no responsibility on the application side for managing image files separately at all.
 
-**却下理由**:
-- ストリーミングレスポンスだとチャンク単位でしかボディが見えず、Base64文字列がチャンク境界で分断される可能性がある
-- 「たまたまBase64っぽい文字列」を誤検出するリスクがある
-- レスポンス全体を舐める処理を毎リクエスト行うのは非効率
-- Markdownパーサーは「どこが画像か」を既に正確に把握しているので、その情報を使わずにHTML文字列を後から推測でスキャンするのは筋が悪い
+The approach has a side effect, though. Because **the image bytes are embedded as text in the rendered HTML**, the following happens:
 
-### 2-2. 保存時に本文を書き換えて物理ファイル参照にする
+- Neither browser caches nor CDN caches can help (`<img src="data:...">` has no URL, so it is not subject to HTTP caching)
+- Every page view transfers the full image bytes again (about 33% larger because of base64)
 
-「レスポンス時ではなく保存時に1回だけ変換すればいい」という代替案。保存フックでBase64画像を検出し、ファイルとして書き出した上で、**DBの本文自体をURL参照に書き換える**、という案。
-
-**却下理由**（フィードバックで判明）:
-- DB（またはgitリポジトリ）だけで完結するという**可搬性**が失われる。本文がURL参照になると、そのURLが指す物理ファイルがなければコンテンツが成立しなくなり、「DBの中身だけが唯一の実体」という前提が崩れる
-- 「キャッシュはいつでもDBの内容から作り直せる」という、当初からの重要な設計思想とも矛盾する
+Eliminating this side effect was the starting point.
 
 ---
 
-## 3. 採用した方針
+## 2. Alternatives considered and rejected
 
-**kramdownのHTML変換処理内（`convert_img`）でのみ、Base64画像を物理ファイルへ変換する。DBやgitリポジトリ上の本文は一切変更しない。**
+### 2-1. A Rack middleware that rewrites the whole response
 
-kramdownは`Converter::Html`をサブクラス化し、`convert_#{要素タイプ}`という命名規則のメソッドをオーバーライドすることで、要素ごとの変換ロジックを差し替えられる設計になっている。画像要素（`:img`）に対する`convert_img`をオーバーライドし、`src`が`data:image/...;base64,...`形式であれば、物理ファイル化した上でその参照に差し替える。
+The first idea raised: after the HTTP response is generated, a middleware scans the entire response body with a regular expression or similar, detects base64 images, writes them to files and replaces them with URLs.
+
+**Reasons for rejection**:
+- With streaming responses the body is only visible chunk by chunk, so a base64 string may be split across a chunk boundary
+- There is a risk of false positives on strings that merely look like base64
+- Scanning the whole response on every request is inefficient
+- The Markdown parser already knows exactly where the images are, so guessing from the HTML string afterwards without using that information is the wrong approach
+
+### 2-2. Rewrite the body at save time into physical file references
+
+The alternative of "converting once at save time rather than at response time." A save hook detects base64 images, writes them out as files, and then **rewrites the body in the database itself into URL references**.
+
+**Reasons for rejection** (learned from feedback):
+- The **portability** of "the database (or git repository) alone is enough" is lost. Once the body holds URL references, the content no longer stands without the physical files those URLs point to, breaking the premise that the database content is the only source of truth
+- It also contradicts the original key design principle that "the cache can always be rebuilt from the database content"
+
+---
+
+## 3. Adopted approach
+
+**Convert base64 images into physical files only inside Kramdown's HTML conversion (`convert_img`). The body in the database or git repository is never modified.**
+
+Kramdown is designed so that you can subclass `Converter::Html` and override methods following the `convert_#{element type}` naming convention to replace the conversion logic per element. We override `convert_img` for image elements (`:img`); if `src` has the form `data:image/...;base64,...`, we write it out as a physical file and swap in a reference to it.
 
 ```ruby
 class Converter < Kramdown::Converter::Html
@@ -78,114 +80,113 @@ class Converter < Kramdown::Converter::Html
     src = el.attr["src"]
     if src&.start_with?("data:image/")
       rewritten = store.materialize(src, content_id: content_id)
-      # el を複製した上で src を書き換え、super に委譲して本来の <img> タグ生成へ
+      # copy el with src replaced, then delegate to super to build the <img> tag
     end
     super(el, indent)
   end
 end
 ```
 
-**実装時に判明した注意点（いずれもDocker上でテストを実際に実行して初めて発覚した。コードレビューだけでは気づけなかった）**：
+**Pitfalls found during implementation (both surfaced only by actually running the tests in Docker; code review alone would not have caught them)**:
 
-1. `Kramdown::Converter::Base.new`は`private_class_method`されており、公開APIは`.convert`クラスメソッド（内部で`new`してすぐ`#convert`まで実行する）のみに絞られている。今回は`content_id`／`store`をインスタンスに設定してから`#convert`を呼びたいため、`Converter`サブクラス内で`public_class_method :new`を明示し、このサブクラスに限って`new`を再公開している
-2. `Kramdown::Element`は`attr`（読み取り）は公開しているが`attr=`（書き込み）は公開していない。要素を複製して`src`だけ書き換える、という当初の実装（`el.dup; el.attr = el.attr.dup`）は動かず、代わりに`Kramdown::Element.new(el.type, el.value, new_attr, el.options)`で同じtype／value／optionsを持つ新しい要素を組み立て直す形にした
+1. `Kramdown::Converter::Base.new` is made `private_class_method`, and the public API is limited to the `.convert` class method (which instantiates internally and immediately runs `#convert`). Here we want to set `content_id` / `store` on the instance before calling `#convert`, so the `Converter` subclass declares `public_class_method :new` to re-expose `new` on this subclass only
+2. `Kramdown::Element` exposes `attr` (read) but not `attr=` (write). The original implementation, which copied the element and rewrote only `src` (`el.dup; el.attr = el.attr.dup`), did not work. Instead we build a new element with the same type / value / options via `Kramdown::Element.new(el.type, el.value, new_attr, el.options)`
 
-この方式が2-1・2-2に勝る点：
+Advantages of this approach over 2-1 and 2-2:
 
-- Markdownパーサーが既に「ここは画像だ」と教えてくれる場所でしか処理しないため、誤検出やストリーミング分断の心配がない
-- **本文（DB／gitリポジトリ）は完全に不変のまま**。可搬性・「キャッシュは本文からいつでも再生成可能」という前提を両方とも満たす
-- キャッシュディレクトリは完全に使い捨て・再生成可能な派生物として扱える（`rm -rf`しても、全コンテンツを再レンダリングすれば元通りに復元できる）
+- Processing happens only where the Markdown parser has already told us "this is an image," so there are no false positives and no streaming-split problem
+- **The body (database / git repository) stays completely unchanged**. Both portability and the premise that "the cache can always be regenerated from the body" are satisfied
+- The cache directory can be treated as a fully disposable, regenerable derived artifact (even after `rm -rf`, re-rendering all content restores it)
 
 ---
 
-## 4. コンポーネント構成
+## 4. Components
 
-| コンポーネント | 役割 |
+| Component | Role |
 |---|---|
-| `Materializer` | Base64データURIのパース、SHA256ハッシュ計算、アトミックなファイル書き込み。content_idという概念を一切知らない、最も低レイヤーの部品 |
-| `Store` | `content_id`単位でネームスペース分割された、content-addressableなキャッシュの管理（materialize／sync／purge_all／sweep） |
-| `Converter` | kramdownの`convert_img`フック。レンダリング中に`Store`を呼び出し、`src`を書き換える |
-| `Scanner` | HTMLを生成せず、本文中のBase64画像URI一覧だけを取得する（保存時のsync用。フルレンダリングという無駄な処理を避けるため） |
-| `Model`（オプション） | ActiveRecordの`after_commit`にsync／purgeを自動配線するmixin |
+| `Materializer` | Parses base64 data URIs, computes the SHA256 hash, and writes files atomically. The lowest-level part; knows nothing about `content_id` |
+| `Store` | Manages the content-addressable cache, namespaced per `content_id` (materialize / sync / purge_all / sweep) |
+| `Converter` | Kramdown's `convert_img` hook. Calls `Store` during rendering and rewrites `src` |
+| `Scanner` | Returns only the list of base64 image URIs in the body, without generating HTML (used for sync at save time; avoids the waste of a full render) |
+| `Model` (optional) | A mixin that wires sync / purge automatically into ActiveRecord's `after_commit` |
 
-### ファイルパスの設計：content-addressable + content_idネームスペース
+### File path design: content-addressable + content_id namespace
 
 ```
 <root>/<content_id>/<sha256>.<ext>
 ```
 
-ハッシュ値をファイル名にすることで、**画像が差し替えられれば自動的にファイル名も変わる**（キャッシュ無効化ロジックが不要）。さらに`content_id`でディレクトリを分けることで、「このキャッシュファイルはどのコンテンツの持ち物か」が自明になり、掃除処理をコンテンツの更新・削除という自然なライフサイクルイベントに素直に結び付けられる。
+Using the hash as the file name means **replacing an image automatically changes its file name** (no cache invalidation logic is needed). Splitting directories by `content_id` makes it obvious which content owns each cache file, so cleanup can be tied naturally to the content's own lifecycle events: update and destroy.
 
-**トレードオフ**：`content_id`でネームスペースを分けると、複数のコンテンツが同一画像（同じロゴ等）を使い回した場合の重複排除ができなくなる。グローバルなハッシュのみでの重複排除と、`content_id`単位での明快な所有権管理は、両立させようとすると「参照カウント方式」（実ファイルはグローバルなハッシュパスに置き、`content_id → hash`の参照だけ別途記録する）が必要になり、実装が一段複雑になる。今回は想定する利用規模（コンテンツごとに画像が基本ユニーク）を踏まえ、**シンプルさを優先してcontent_idネームスペース方式を採用**した。将来、画像の使い回しが多いことが分かれば、参照カウント方式への移行を検討する。
+**Trade-off**: Namespacing by `content_id` means that when several contents reuse the same image (the same logo, for example), it cannot be deduplicated. Combining global hash-only deduplication with clear per-`content_id` ownership requires a "reference counting" scheme (real files live at a global hash path, and only the `content_id → hash` references are recorded separately), which makes the implementation one level more complex. Given the expected scale of use (images are mostly unique per content), **we chose the content_id namespace scheme for simplicity**. If image reuse turns out to be common, we will consider moving to reference counting.
 
+### Design decisions behind the allowlist
 
-### 許可リストの設計判断
+Only **PNG / JPEG / GIF / WebP** are cached; everything else stays as a `data:` URI.
 
-キャッシュするのは**PNG／JPEG／GIF／WebPのみ**とし、それ以外は`data:`のまま残す。
-
-- **シグネチャで判定する**：`data:image/<形式>`の宣言は攻撃者が自由に書けるため信用しない。デコードしたバイト列の先頭（PNGの8バイト、JPEGの`FF D8 FF`、`GIF87a`／`GIF89a`、`RIFF....WEBP`）を見て、宣言と一致したものだけを書き出す。デコード（描画）まではしない
-- **拡張子は判定結果から決める**：配信側は通常、拡張子から`Content-Type`を決める。拡張子を宣言から決めると、画像の拡張子でHTML等を配信させられてしまう。`image/jpg`はJPEGの（非標準だが一般的な）宣言として受け入れ、拡張子は`jpg`にする
-- **スキーム部は小文字のみ**：`data:image/`は小文字のみ対応。形式名の大小文字は区別しない
-- **ポリグロットは配信側で防ぐ**：画像としてもHTMLとしても有効なファイルは、シグネチャ判定では排除できない。これは配信側の`X-Content-Type-Options: nosniff`（と`Content-Security-Policy: sandbox`）で防ぐ前提とし、READMEに配信側の責務として明記した
-- **拡張方法**：形式を足すときは、`Materializer::ALLOWED_FORMATS`に宣言名と拡張子を足し、`Materializer.detect_extension`にシグネチャを足す
+- **Decide by signature**: the `data:image/<format>` declaration can be written freely by an attacker, so it is not trusted. We look at the leading bytes of the decoded data (the 8-byte PNG signature, JPEG's `FF D8 FF`, `GIF87a` / `GIF89a`, `RIFF....WEBP`) and write out only what matches the declaration. We do not decode (render) the image
+- **The extension comes from the detection result**: a delivery layer usually decides `Content-Type` from the file extension. If the extension came from the declaration, HTML or similar could be served under an image extension. `image/jpg` is accepted as a (non-standard but common) declaration of JPEG, and the extension is `jpg`
+- **The scheme part is lowercase only**: `data:image/` is supported in lowercase only. Format names are case-insensitive
+- **Polyglots are stopped by the delivery layer**: a file that is valid both as an image and as HTML cannot be excluded by signature checking. We rely on the delivery layer's `X-Content-Type-Options: nosniff` (and `Content-Security-Policy: sandbox`) to stop them, and state this explicitly in the README as a delivery-side responsibility
+- **How to extend**: to add a format, add its declared name and extension to `Materializer::ALLOWED_FORMATS`, and add its signature to `Materializer.detect_extension`
 
 ---
 
-## 5. キャッシュの掃除（差分削除）
+## 5. Cache cleanup (differential deletion)
 
-### 5-1. 検討したが採用しなかった案：git diffの活用
+### 5-1. Considered but not adopted: using git diff
 
-コンテンツの更新は必ずgitコミットを伴う、という実装上の性質を踏まえ、「更新前後のコミットの`git diff`を使えば、削除すべき画像（＝差分で消えた行）をピンポイントで特定でき、本文全体を毎回パースするより効率的なのでは」という案が検討された。
+Given that every content update necessarily involves a git commit, the idea was raised that "the `git diff` between the commits before and after the update could pinpoint the images to delete (the lines that disappeared), which is more efficient than parsing the whole body every time."
 
-**技術的には成立する**（pathspec指定で対象ファイルの変更のみに絞れる、コミットSHAをDB側に保持しておけば`git diff <old_sha> <new_sha> -- <path>`で差分を取得できる、等）。
+**Technically this works** (a pathspec narrows it to changes in the target file, and if the commit SHA is kept on the database side, `git diff <old_sha> <new_sha> -- <path>` yields the difference, and so on).
 
-**しかし採用しなかった理由**：
+**Reasons we did not adopt it**:
 
-1. **効率面での逆転**：現状の実装では、git操作は毎回`fork`/`exec`でgitバイナリをシェルアウトして呼び出している。プロセス起動には（OS・リポジトリの状態にもよるが）数ms〜十数msのオーバーヘッドが乗る。一方、Ruby側で完結する「本文を正規表現でスキャンし、埋め込み画像をSHA256でハッシュ化する」処理は、圧縮済みの画像であれば1桁ms未満のインプロセス計算で完結する。**つまり、素朴な全文パースの方がgit diffベースの方式より高速**、という結果になった
-2. gitのdiffは元々「行単位の変更検出」が本質であり、Base64画像1つが1行として保存されている前提が崩れる（行が途中で折り返される等）と、想定通りの粒度で差分が取れない可能性がある
-3. コンテンツ削除（destroy）のケースには結局diffが使えず、別ロジックが必要になり、実装が2系統に分かれる
+1. **Efficiency is reversed**: the current implementation shells out to the git binary via `fork` / `exec` every time. Process startup adds overhead of a few to a dozen-odd ms (depending on the OS and the state of the repository). Meanwhile, "scan the body with a regular expression and hash the embedded images with SHA256" finishes as an in-process computation in under a millisecond for compressed images. **So the naive full parse is faster than a git-diff-based approach**
+2. git diff is fundamentally about line-level change detection, and if the premise that one base64 image is stored as one line breaks (for example, lines get wrapped partway), the diff may not have the expected granularity
+3. For content deletion (destroy), diff cannot be used anyway, so separate logic is needed, and the implementation would split into two paths
 
-（なお、もし将来`rugged`（libgit2のインプロセスバインディング）へgit操作全体を移行するなら、プロセス起動コストは解消されるため、この結論は変わりうる。ただし今回はそのための移行を正当化するには至らないと判断した。）
+(If git operations as a whole are moved to `rugged`, the in-process libgit2 binding, in the future, the process startup cost disappears and this conclusion could change. We judged that this alone did not justify such a migration.)
 
-### 5-2. 採用した方式：新しい本文からの全文パース＋ディスク上のファイルとの差分
+### 5-2. Adopted: full parse of the new body + diff against files on disk
 
 ```ruby
 def sync(content_id, referenced_data_uris)
   keep = referenced_data_uris.filter_map { |uri| Materializer.parse(uri)&.filename }.to_set
-  # content_id配下のファイルのうち、keepに含まれないものだけを削除
+  # delete only the files under content_id that are not in keep
 end
 ```
 
-- 新しい本文をパースして「現在参照されているハッシュの集合」を作る（`Scanner`で、HTML生成を伴わない軽量パースのみ行う）
-- ディスク上の`content_id`配下のファイル一覧と突き合わせ、参照されなくなったものだけを削除する
-- **「更新のたびに丸ごと削除する」のではなく、差分だけを削除する**。変化していない画像は再ハッシュこそするが、既にファイルが存在するので書き込みは発生しない（`Materializer.write`は既存ファイルがあれば即return）
+- Parse the new body to build "the set of hashes currently referenced" (`Scanner` does only a lightweight parse with no HTML generation)
+- Compare with the list of files under `content_id` on disk, and delete only those that are no longer referenced
+- **Delete only the difference, rather than deleting everything on every update**. Unchanged images are re-hashed, but because the file already exists no write occurs (`Materializer.write` returns immediately if the file exists)
 
-### 5-3. `after_commit`を使う理由
+### 5-3. Why `after_commit`
 
-`after_update`のような、DBコミット前のコールバックでファイル削除を行うと、**トランザクションが後で失敗してロールバックされた場合でも、ファイルシステム上の削除は取り消せない**。DBは元の状態に戻っているのに、キャッシュファイルだけが消えている、という不整合が起きる。ファイル操作のような非トランザクショナルな副作用は、`after_commit`（`update`・`destroy`両方）で行うのが定石であり、`Model`もこれに従っている。
+If file deletion runs in a callback before the database commit, such as `after_update`, **the filesystem deletion cannot be undone even if the transaction later fails and is rolled back**. The database returns to its original state, but the cache files are gone. Non-transactional side effects such as file operations belong in `after_commit` (for both `update` and `destroy`), and `Model` follows this.
 
-### 5-4. 保険としての低頻度sweep
+### 5-4. A low-frequency sweep as insurance
 
-`sync`／`purge_all`はどちらも「そのフックを通った更新・削除」でしか機能しない。管理コンソールからの直接編集、データ移行スクリプト、バックアップからの復元、あるいは単純なバグなどで、このフックを経由しない変更が発生した場合、静かにキャッシュファイルが孤児化していく。
+`sync` / `purge_all` only work for "updates and deletions that went through the hook." If a change bypasses the hook (direct edits from an admin console, data migration scripts, restores from backup, or plain bugs), cache files quietly become orphaned.
 
-これに対する唯一の対策は、**「現在生存しているcontent_idの完全な一覧」と実際のキャッシュディレクトリを突き合わせ、生存していないcontent_idのディレクトリを削除する」という低頻度（週次〜月次程度）の安全網スイープ**（`Store#sweep`）である。これは主経路（`sync`／`purge_all`）を置き換えるものではなく、あくまで保険として位置づける。
-
----
-
-## 6. Kamalデプロイとの関係
-
-このキャッシュディレクトリは、SQLite3をKamalでデプロイする際のボリューム設定と同種の論点を持つ。
-
-- **永続ボリュームにしない場合**：デプロイの度にキャッシュが消える。完全に再生成可能なので**壊れることはない**が、デプロイ直後は全コンテンツが「初回アクセス＝再生成」を再度払うことになり、一時的なレイテンシ増加が起きうる
-- **永続ボリュームにする場合**：デプロイを跨いでキャッシュが残るため、上記のコールドスタートを避けられる。バックアップ対象がDB（またはgitリポジトリ）のみで済むという利点自体は損なわれない
-
-どちらを選ぶかは、デプロイ頻度・許容できる初回レイテンシ次第の判断になる。
+The only remedy is **a low-frequency (roughly weekly to monthly) safety-net sweep (`Store#sweep`) that compares "the complete list of currently live content_ids" with the actual cache directory and deletes directories of content_ids that are not live**. It does not replace the main path (`sync` / `purge_all`); it is positioned strictly as insurance.
 
 ---
 
-## 7. その他の留意点・今後の検討事項
+## 6. Relationship to Kamal deployment
 
-- **SVG対応**：SVGはスクリプトを含められるため、許可リスト（4章）の対象外とし、`data:image/svg+xml;base64,...`は`data:`のまま出力する（キャッシュしない）。対応するなら、サニタイズ（`Loofah`等）に加え、配信側で`Content-Security-Policy`を付ける設計が別途必要になる
-- **フォーマット拡張性**：`convert_img`の中で完全に制御できるため、JXL等の新フォーマットへの対応は「デコードしたバイナリを別フォーマットにトランスコードしてから書き込む」だけで済む。`<picture>`要素で複数フォーマットを併記し、ブラウザに選ばせる拡張も、同じフックの中で自然に実現できる
-- **重複排除**：4章で触れた通り、`content_id`単位のネームスペース分割は、複数コンテンツ間での同一画像の重複排除を犠牲にしている。実際の利用パターンを見て、必要であれば参照カウント方式への移行を検討する
-- **自動テストの実行結果**：Docker上（Ruby 3.3／3.4、kramdown 2.5.2、minitest 5）で54件（166アサーション）すべて成功（2026-11-10）。実行は`bin/docker-test`（`TEST_RUBY_VERSION=3.4 bin/docker-test`で版を切り替え）
+This cache directory raises the same kind of question as the volume configuration when deploying SQLite3 with Kamal.
+
+- **Without a persistent volume**: the cache disappears on every deploy. It is fully regenerable, so **nothing breaks**, but right after a deploy every content has to pay the "first access = regeneration" cost again, which can cause a temporary latency increase
+- **With a persistent volume**: the cache survives across deploys, avoiding that cold start. The advantage that only the database (or git repository) needs to be backed up is not lost
+
+Which to choose depends on deploy frequency and the first-access latency you can tolerate.
+
+---
+
+## 7. Other notes and future considerations
+
+- **SVG support**: SVG can contain scripts, so it is outside the allowlist (chapter 4), and `data:image/svg+xml;base64,...` is output as a `data:` URI (not cached). Supporting it would require, in addition to sanitization (`Loofah` or similar), a separate design that adds `Content-Security-Policy` on the delivery side
+- **Format extensibility**: because everything is controlled inside `convert_img`, supporting a new format such as JXL only requires "transcoding the decoded binary into another format before writing it." Extensions such as listing several formats in a `<picture>` element and letting the browser choose also fit naturally inside the same hook
+- **Deduplication**: as noted in chapter 4, namespacing by `content_id` gives up deduplication of the same image across contents. Depending on actual usage patterns, consider moving to reference counting if needed
+- **Automated test results**: all 54 tests (166 assertions) pass in Docker (Ruby 3.3 / 3.4, kramdown 2.5.2, minitest 5) (2026-11-10). Run with `bin/docker-test` (switch versions with `TEST_RUBY_VERSION=3.4 bin/docker-test`)

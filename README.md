@@ -6,7 +6,7 @@ A small Kramdown extension for Markdown that stores images inline as base64 `dat
 
 Why: a `data:` URI has no URL, so browsers and CDNs cannot cache it, and every page view re-sends the image bytes (about 33% larger than the binary). Keeping the images inline in the source is still attractive, because the database row or the git repository stays a single, self-contained, portable blob of text. This gem keeps that property and fixes the delivery side.
 
-For the design rationale, rejected alternatives and trade-offs, see [`doc/design.md`](./doc/design.md)  (written in Japanese).
+For the design rationale, rejected alternatives and trade-offs, see [`doc/design.md`](./doc/design.md) ([Japanese version](./doc/design.ja.md)).
 
 ## Features
 

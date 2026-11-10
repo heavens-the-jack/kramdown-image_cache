@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# ホストのRuby環境に触れずにテストを実行する。
+# Runs the tests without touching the host's Ruby environment.
 #
-# 実行ユーザーのUID/GIDをコンテナに渡すことで、bundle installが生成する
-# Gemfile.lockや.bundle/がroot所有になるのを防いでいる（docker-compose.yml参照）。
+# Passing the current user's UID/GID to the container keeps the files that
+# bundle install generates (Gemfile.lock, .bundle/) from being owned by root
+# (see docker-compose.yml).
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
