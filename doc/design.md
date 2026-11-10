@@ -27,7 +27,7 @@
 - `bin/docker-test` passes on both Ruby 3.3 and 3.4, with no warnings originating from this gem
 - Formats outside the allowlist (SVG, HTML, ...) and images whose declaration disagrees with their signature stay as `data:` and no file is written (`test/materializer_test.rb`, `test/converter_test.rb`)
 - The public contract (subclassing, GFM, pass-through when unconfigured, `content_id` shapes) is pinned by `test/contract_test.rb`
-- `gem build` succeeds without warnings, and the built gem contains `CHANGELOG.md`, the READMEs and the LICENSE
+- `gem build` succeeds with no warnings other than the accepted ones (open-ended dependency versions, and `homepage_uri` / `source_code_uri` pointing to the same URL), and the built gem contains `CHANGELOG.md`, the READMEs and the LICENSE
 
 ---
 

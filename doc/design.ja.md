@@ -27,7 +27,7 @@
 - Ruby 3.3／3.4の両方で`bin/docker-test`がすべて成功し、このgem由来の警告がない
 - 許可外の形式（SVG、HTML等）と、宣言とシグネチャが食い違う画像は`data:`のまま出力され、ファイルが書かれない（`test/materializer_test.rb`、`test/converter_test.rb`）
 - 公開契約（サブクラス化、GFM、未設定時の素通し、`content_id`の形）が`test/contract_test.rb`で固定されている
-- `gem build`が警告なく通り、成果物に`CHANGELOG.md`・README・LICENSEが含まれる
+- `gem build`が、許容した警告（依存バージョンの上限なし、`homepage_uri`と`source_code_uri`が同一URL）以外の警告なく通り、成果物に`CHANGELOG.md`・README・LICENSEが含まれる
 
 ---
 
