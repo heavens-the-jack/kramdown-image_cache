@@ -28,8 +28,10 @@ Gem::Specification.new do |spec|
   spec.files = Dir["lib/**/*.rb", "doc/**/*.md", "README.md", "LICENSE.txt"]
   spec.require_paths = ["lib"]
 
+  spec.add_dependency "base64", ">= 0.1"
   spec.add_dependency "kramdown", ">= 2.3"
 
+  spec.add_development_dependency "kramdown-parser-gfm", "~> 1.1"
   spec.add_development_dependency "minitest", "~> 5.0"
   spec.add_development_dependency "rake", "~> 13.0"
 end

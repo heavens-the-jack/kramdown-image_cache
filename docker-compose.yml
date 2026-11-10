@@ -10,7 +10,8 @@
 #   docker compose run --rm test   （直接呼ぶ場合。詳細はREADME参照）
 services:
   test:
-    image: ruby:3.2-slim
+    # 既定はRuby 3.3。別の版で試すときは TEST_RUBY_VERSION=3.4 bin/docker-test
+    image: ruby:${TEST_RUBY_VERSION:-3.3}-slim
     working_dir: /gem
     # ホスト側の実行ユーザーと同じUID/GIDでコンテナを動かし、bundle installで
     # 生成されるGemfile.lockや.bundle/がroot所有になるのを防ぐ。
