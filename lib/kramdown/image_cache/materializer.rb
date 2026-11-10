@@ -14,19 +14,30 @@ module Kramdown
     class Materializer
       DATA_URI = %r{\Adata:image/(?<format>[a-zA-Z0-9.+-]+);base64,(?<data>.+)\z}m.freeze
 
-      # data URI format -> file extension, for the handful of cases where
-      # they differ.
-      FORMAT_ALIASES = {
+      # The formats we are willing to write to disk: declared data URI
+      # subtype (lowercase) -> file extension. Anything else (SVG, HTML, ...)
+      # is left alone as a `data:` URI. The extension of the cached file is
+      # decided from the sniffed bytes, never from the declaration, so a
+      # delivery layer that maps extension -> Content-Type can't be tricked
+      # into serving active content. Adding a format (e.g. AVIF) means adding
+      # an entry here and a signature in .detect_extension.
+      # "jpg" is accepted as a (non-standard but common) declaration of JPEG.
+      ALLOWED_FORMATS = {
+        "png" => "png",
         "jpeg" => "jpg",
-        "svg+xml" => "svg"
+        "jpg" => "jpg",
+        "gif" => "gif",
+        "webp" => "webp"
       }.freeze
 
       Result = Struct.new(:hash, :extension, :filename, :bytes, keyword_init: true)
 
       class << self
         # Parses +data_uri+. Returns a Result, or nil if it isn't a
-        # recognizable base64-encoded image (a normal http(s) URL, a
-        # malformed data URI, invalid base64, ...). Never raises - anything
+        # recognizable base64-encoded image of an allowed format (a normal
+        # http(s) URL, a malformed data URI, invalid base64, a format outside
+        # ALLOWED_FORMATS, or bytes whose signature doesn't match the declared
+        # format). Never raises - anything
         # that doesn't parse cleanly is treated as "not our concern, leave
         # it alone" so a single bad image can't break a whole render.
         def parse(data_uri)
@@ -36,7 +47,11 @@ module Kramdown
           bytes = safe_decode(match[:data])
           return nil unless bytes
 
-          extension = FORMAT_ALIASES.fetch(match[:format].downcase, match[:format].downcase)
+          declared = ALLOWED_FORMATS[match[:format].downcase]
+          return nil unless declared
+          return nil unless detect_extension(bytes) == declared
+
+          extension = declared
           hash = Digest::SHA256.hexdigest(bytes)
 
           Result.new(hash: hash, extension: extension, filename: "#{hash}.#{extension}", bytes: bytes)
@@ -58,6 +73,23 @@ module Kramdown
           tmp_path = "#{path}.#{Process.pid}-#{SecureRandom.hex(4)}.tmp"
           File.binwrite(tmp_path, bytes)
           File.rename(tmp_path, path)
+        end
+
+        # Sniffs the leading bytes. Returns "png"/"jpg"/"gif"/"webp", or nil
+        # if the signature is none of the allowed formats. This checks the
+        # signature only - it does not decode the image.
+        def detect_extension(bytes)
+          head = bytes.byteslice(0, 12).to_s.b
+
+          if head.start_with?("\x89PNG\r\n\x1A\n".b)
+            "png"
+          elsif head.start_with?("\xFF\xD8\xFF".b)
+            "jpg"
+          elsif head.start_with?("GIF87a".b, "GIF89a".b)
+            "gif"
+          elsif head.bytesize == 12 && head.start_with?("RIFF".b) && head.byteslice(8, 4) == "WEBP".b
+            "webp"
+          end
         end
 
         private

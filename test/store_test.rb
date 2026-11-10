@@ -26,6 +26,27 @@ class StoreTest < Minitest::Test
     assert_nil @store.materialize("https://example.com/a.png", content_id: 42)
   end
 
+  def test_materialize_returns_nil_and_writes_nothing_for_a_disallowed_format
+    [
+      data_uri("html", HTML_BYTES),
+      data_uri("svg+xml", "<svg/>".b),
+      data_uri("png", HTML_BYTES)
+    ].each do |uri|
+      assert_nil @store.materialize(uri, content_id: 42)
+    end
+
+    refute Dir.exist?(File.join(@dir, "42"))
+  end
+
+  def test_sync_does_not_treat_a_disallowed_data_uri_as_a_reference
+    @store.materialize(png_data_uri, content_id: 1)
+
+    removed = @store.sync(1, [data_uri("svg+xml", "<svg/>".b)])
+
+    assert_equal 1, removed.size
+    assert_empty Dir.children(File.join(@dir, "1"))
+  end
+
   def test_sync_removes_files_no_longer_referenced_but_keeps_the_rest
     @store.materialize(png_data_uri, content_id: 1)
     @store.materialize(gif_data_uri, content_id: 1)

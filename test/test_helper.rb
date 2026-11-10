@@ -19,6 +19,25 @@ module FixtureImages
     "data:image/gif;base64,#{FixtureImages::GIF_1X1}"
   end
 
+  # Signature-valid JPEG / WebP byte strings. Only the leading bytes matter to
+  # the format check (we sniff signatures, we don't decode), so these are
+  # minimal containers rather than renderable images.
+  JPEG_BYTES = "\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x00\x00\x01\x00\x01\x00\x00\xFF\xD9".b.freeze
+  WEBP_BYTES = "RIFF\x1A\x00\x00\x00WEBPVP8L\x0D\x00\x00\x00\x2F\x00\x00\x00\x10\x07\x10\x11\x11\x88\x88\xFE\x07\x00".b.freeze
+  HTML_BYTES = "<script>alert(1)</script>".b.freeze
+
+  def data_uri(mime, bytes)
+    "data:image/#{mime};base64,#{Base64.strict_encode64(bytes)}"
+  end
+
+  def jpeg_bytes
+    JPEG_BYTES
+  end
+
+  def webp_bytes
+    WEBP_BYTES
+  end
+
   def png_bytes
     Base64.strict_decode64(FixtureImages::PNG_1X1)
   end

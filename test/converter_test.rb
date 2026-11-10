@@ -56,6 +56,37 @@ class ConverterTest < Minitest::Test
     assert_match(%r{src="/assets/img/5/[0-9a-f]{64}\.png"}, html)
   end
 
+  # --- R2: disallowed formats stay as data: URIs and never touch the disk ---
+
+  def test_render_leaves_disallowed_formats_as_data_uris_and_writes_nothing
+    [
+      data_uri("html", HTML_BYTES),
+      data_uri("php", "<?php echo 1; ?>".b),
+      data_uri("svg+xml", "<svg xmlns='http://www.w3.org/2000/svg'/>".b),
+      data_uri("png", HTML_BYTES), # declared png, actually html
+      data_uri("png", jpeg_bytes)  # declared png, actually jpeg
+    ].each do |uri|
+      html, = Kramdown::ImageCache.render("![alt](#{uri})", content_id: 5, store: @store)
+
+      assert_includes html, uri.sub("&", "&amp;"), "should be left as the original data: URI"
+      refute_includes html, "/images/cache/"
+    end
+
+    refute Dir.exist?(File.join(@dir, "5")), "nothing should have been written for rejected images"
+  end
+
+  def test_render_rewrites_allowed_formats_with_the_detected_extension
+    {
+      "jpg" => data_uri("jpeg", jpeg_bytes),
+      "gif" => gif_data_uri,
+      "webp" => data_uri("webp", webp_bytes)
+    }.each do |extension, uri|
+      html, = Kramdown::ImageCache.render("![alt](#{uri})", content_id: 5, store: @store)
+
+      assert_match(%r{src="/images/cache/5/[0-9a-f]{64}\.#{extension}"}, html)
+    end
+  end
+
   def test_render_raises_without_a_store
     assert_raises(Kramdown::ImageCache::Error) do
       Kramdown::ImageCache.render("![alt](#{png_data_uri})", content_id: 5, store: nil)
