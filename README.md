@@ -169,6 +169,16 @@ end
 
 Configure your static host to send the headers listed above for `/images/cache/`.
 
+## Versioning and API stability
+
+This gem follows [Semantic Versioning](https://semver.org/). The following public API is kept compatible; a breaking change to any of it bumps the **major** version:
+
+- `Kramdown::ImageCache::Store` (`new(root:)`, `materialize`, `sync`, `purge_all`, `sweep`)
+- `Kramdown::ImageCache::Converter` (`content_id`, `store`, `url_prefix`, and subclassing)
+- `Kramdown::ImageCache.render`, `.sync`, `.purge` and `Kramdown::ImageCache::Scanner.data_uris`
+
+Adding a format to the allowlist (for example AVIF) is a backward-compatible change and is released as a **minor** version. Every release is recorded in [`CHANGELOG.md`](./CHANGELOG.md).
+
 ## Testing
 
 Tests run in Docker only, so nothing is installed on your machine:

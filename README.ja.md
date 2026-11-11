@@ -169,6 +169,16 @@ end
 
 静的ホスティング側で、`/images/cache/`に上記のヘッダーを付けるよう設定してください。
 
+## バージョニングとAPIの安定
+
+このgemは[セマンティックバージョニング](https://semver.org/lang/ja/)に従います。次の公開APIは互換性を保ち、破壊的な変更を行うときは**メジャー**バージョンを上げます。
+
+- `Kramdown::ImageCache::Store`（`new(root:)`、`materialize`、`sync`、`purge_all`、`sweep`）
+- `Kramdown::ImageCache::Converter`（`content_id`、`store`、`url_prefix`、およびサブクラス化）
+- `Kramdown::ImageCache.render`、`.sync`、`.purge`、`Kramdown::ImageCache::Scanner.data_uris`
+
+許可リストへの形式の追加（例：AVIF）は後方互換の変更として、**マイナー**バージョンで行います。各リリースの内容は[`CHANGELOG.md`](./CHANGELOG.md)に記録します。
+
 ## テスト
 
 テストはDockerだけで実行します。ホストには何もインストールしません。
