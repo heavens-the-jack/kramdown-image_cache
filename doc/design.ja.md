@@ -14,13 +14,15 @@
 
 | ID | 要件 |
 |---|---|
-| R1 | 公開Gitタグ（`v0.1.0`）から、Gemfileの`git:`／`tag:`指定で利用できる（gemspecに`source_code_uri`・`changelog_uri`、`CHANGELOG.md`を備える） |
-| R2 | キャッシュする画像形式はPNG／JPEG／GIF／WebPのみ。判定は宣言ではなくシグネチャで行い、許可外は`data:`のまま残す |
-| R3 | Ruby 3.4以降でも警告なく動く（`base64`を明示的な依存にする） |
-| R4 | `Converter`を継承して描画を拡張でき、`url_prefix`・`content_id`を描画ごとに変えられる。`input: "GFM"`が使える。`store`／`content_id`が未設定なら`data:`のまま出力する |
-| R5 | `content_id`は整数でも文字列でも使える。不正なIDは`Error`にして、ファイルを書かない |
-| R6 | Rails以外（Sinatra、静的サイト生成）でも使える。依存は`kramdown`と`base64`のみ |
-| R7 | READMEに、許可リストとその理由、配信側の責務、暗号化コンテンツでは使わないこと、最小例を記載する（英語を正とし、日本語版を併記） |
+| R1 | 外部の `bundle install` でそのまま取得できる形で公開する。公開Gitタグ（`v0.1.0`）を`git:`／`tag:`で参照する。MITライセンス、semver、CHANGELOG、gemspecの`homepage`・`source_code_uri`・`changelog_uri`。公開そのものは、所有者の明示的な依頼を受けてから行う |
+| R2 | キャッシュする形式の許可リスト：PNG／JPEG／GIF／WebPのみ。拡張子は宣言ではなく判定した形式から決める。宣言とシグネチャが食い違うものはキャッシュしない。許可外（SVGを含む）は`data:`のまま残す |
+| R3 | gemspecに`base64`を依存として追加する（Ruby 3.4以降で標準から外れるため）。Ruby 3.3／3.4で警告が出ない |
+| R4 | コンバーターの利用契約：`content_id`・`store`・`url_prefix`を描画ごとに変えられる。`convert_a`などを上書きしたサブクラスと共存できる。`render`・`sync`・`Scanner.data_uris`で`input: "GFM"`が使える。`store`または`content_id`が未設定なら`data:`のまま出力する |
+| R5 | APIの安定：`Store`、`Converter`、`Kramdown::ImageCache.sync`／`purge`、`Scanner.data_uris`は互換性を保つ（破壊的変更はメジャーバージョンを上げる）。`content_id`は整数でも文字列でも受け付ける（`\A[\w-]+\z`の検証は維持） |
+| R6 | テスト：R2・R4の自動テストを追加し、`bin/docker-test`で実行でき、Ruby 3.3で成功する。この文書のテスト結果を最新に保つ |
+| R7 | ドキュメント（READMEとこの文書）：許可リストと理由、配信側の責務（拡張子から`Content-Type`、`nosniff`、`Content-Security-Policy: sandbox`、アクセス制御）、暗号化コンテンツでは使わないこと、`url_prefix`を文脈ごとに変える例 |
+
+汎用gemとするための補足要件（2026-11-10の所有者の回答）：アプリ固有の前提を置かない。特定のアプリを知らなくても通じるREADMEとし、Railsを使わない最小例（Sinatra、静的サイト生成）を載せる。テストはgem単体で完結させる。依存は`kramdown`と`base64`のみ。READMEは英語で書き、日本語版を併記する。
 
 ### 受け入れ条件
 

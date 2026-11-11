@@ -14,13 +14,15 @@
 
 | ID | Requirement |
 |---|---|
-| R1 | Usable from a public Git tag (`v0.1.0`) via `git:` / `tag:` in a Gemfile (the gemspec has `source_code_uri` and `changelog_uri`, and `CHANGELOG.md` is shipped) |
-| R2 | Only PNG / JPEG / GIF / WebP are cached. The format is decided by signature, not by declaration; anything outside the allowlist stays as a `data:` URI |
-| R3 | Works without warnings on Ruby 3.4 and later (`base64` is an explicit dependency) |
-| R4 | Rendering can be extended by subclassing `Converter`, and `url_prefix` / `content_id` can change per render. `input: "GFM"` works. If `store` / `content_id` is not set, output stays as `data:` |
-| R5 | `content_id` works as an Integer or a String. An invalid id raises `Error` and writes nothing |
-| R6 | Usable without Rails (Sinatra, static site generation). Dependencies are `kramdown` and `base64` only |
-| R7 | The README documents the allowlist and its rationale, the delivery layer's responsibilities, that the gem must not be used with encrypted content, and minimal examples (English is canonical; a Japanese version sits alongside) |
+| R1 | Published so that it can be fetched as is by an external `bundle install`: a public Git tag (`v0.1.0`) referenced via `git:` / `tag:`. MIT license, semver, a CHANGELOG, and `homepage` / `source_code_uri` / `changelog_uri` in the gemspec. Publishing itself happens only on the owner's explicit request |
+| R2 | Allowlist of cached formats: only PNG / JPEG / GIF / WebP. The extension comes from the detected format, not the declaration; a declaration that disagrees with the signature is not cached; anything outside the allowlist (SVG included) stays as a `data:` URI |
+| R3 | `base64` is declared as a dependency in the gemspec (it is no longer a default gem as of Ruby 3.4), and no warning appears on Ruby 3.3 / 3.4 |
+| R4 | Converter usage contract: `content_id` / `store` / `url_prefix` can change per render; subclasses overriding methods such as `convert_a` coexist; `input: "GFM"` works for `render`, `sync` and `Scanner.data_uris`; if `store` or `content_id` is not set, output stays as `data:` |
+| R5 | API stability: `Store`, `Converter`, `Kramdown::ImageCache.sync` / `purge` and `Scanner.data_uris` stay compatible (breaking changes bump the major version). `content_id` accepts an Integer or a String (`\A[\w-]+\z` is still enforced) |
+| R6 | Tests: automated tests for R2 and R4, runnable with `bin/docker-test`, passing on Ruby 3.3; the test results in this document are kept current |
+| R7 | Documentation (README and this document): the allowlist and its rationale; the delivery layer's responsibilities (`Content-Type` from the extension, `nosniff`, `Content-Security-Policy: sandbox`, access control); not to be used with encrypted content; an example of varying `url_prefix` per context |
+
+Supplementary requirements for a general-purpose gem (from the owner's response of 2026-11-10): no application-specific assumptions; the README is understandable without knowing any particular application and includes minimal examples without Rails (Sinatra, static site generation); tests are self-contained; dependencies are `kramdown` and `base64` only. The README is written in English, with a Japanese version alongside.
 
 ### Acceptance criteria
 
